@@ -1,0 +1,733 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organic Chemistry Sim - Corrected Drag Preview</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --grid-size: 60px;
+            --atom-size: 44px;
+            --bond-color: #4b5563;
+            --empty-bond-color: #cbd5e1;
+        }
+
+        body {
+            background-color: #f1f5f9;
+            overflow: hidden;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            user-select: none;
+        }
+
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: calc(100vh - 220px);
+            background-image:
+                linear-gradient(to right, #e2e8f0 1px, transparent 1px),
+                linear-gradient(to bottom, #e2e8f0 1px, transparent 1px);
+            background-size: var(--grid-size) var(--grid-size);
+            overflow: hidden;
+            cursor: crosshair;
+        }
+
+        .atom {
+            position: absolute;
+            width: var(--atom-size);
+            height: var(--atom-size);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            color: white;
+            cursor: grab;
+            z-index: 30;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+            transform: translate(-50%, -50%);
+            border: 2px solid transparent;
+            transition: border 0.1s, box-shadow 0.1s;
+        }
+
+        .atom-selected {
+            border: 3px solid #3b82f6 !important;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+
+        .atom-dragging {
+            position: fixed !important;
+            z-index: 2147483647 !important;
+            cursor: grabbing !important;
+            pointer-events: none;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+            opacity: 0.9;
+        }
+
+        .atom-trash {
+            background-color: transparent !important;
+            transform: translate(-50%, -50%) scale(1.5) !important;
+            border: none !important;
+            box-shadow: none !important;
+            color: #ef4444 !important;
+            font-size: 28px !important;
+        }
+
+        .atom-trash::before {
+            content: '🗑️';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .atom-C {
+            background: #1e293b;
+        }
+
+        .atom-O {
+            background: #dc2626;
+        }
+
+        .atom-H {
+            background: #64748b;
+            color: #f8fafc;
+        }
+
+        .atom-N {
+            background: #2563eb;
+        }
+
+        .atom-N {
+            background: #3b82f6;
+            color: white;
+            border-color: #2563eb;
+        }
+
+        .atom-Cl {
+            background: #dcfce7;
+            color: #15803d;
+            border-color: #86efac;
+        }
+
+        .atom-Br {
+            background: #ffedd5;
+            color: #c2410c;
+            border-color: #fdba74;
+        }
+
+        .atom-I {
+            background: #f3e8ff;
+            color: #7e22ce;
+            border-color: #d8b4fe;
+        }
+
+        .atom-ghost-H {
+            background: rgba(241, 245, 249, 0.8);
+            color: rgba(100, 116, 139, 0.6);
+            border: 2px dashed rgba(148, 163, 184, 0.5);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .atom-reaction-selected {
+            box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.5);
+            border-color: #f43f5e;
+            transform: translate(-50%, -50%) scale(1.1) !important;
+            z-index: 40;
+        }
+
+        .group-highlight {
+            position: absolute;
+            border-radius: 12px;
+            z-index: 1;
+            pointer-events: auto;
+            transition: all 0.3s ease;
+            mix-blend-mode: multiply;
+        }
+
+        .group-highlight:hover {
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5);
+            cursor: help;
+        }
+
+        .group-highlight:hover::after {
+            content: attr(data-name);
+            position: absolute;
+            top: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.9);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+            z-index: 100;
+            pointer-events: none;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .group-highlight.highlight-COO {
+            background: rgba(255, 0, 150, 0.15);
+            border: 2px dashed rgba(255, 0, 150, 0.4);
+        }
+
+        .group-highlight.highlight-COC {
+            background: rgba(50, 50, 255, 0.15);
+            border: 2px dashed rgba(50, 50, 255, 0.4);
+        }
+
+        .group-highlight.highlight-ethyl {
+            background: rgba(100, 100, 100, 0.1);
+            border: 2px dashed rgba(100, 100, 100, 0.3);
+        }
+
+        .highlight-COOH {
+            background-color: #fce7f3;
+            border: 2px solid #fbcfe8;
+        }
+
+        .highlight-OH {
+            background-color: #e0f2fe;
+            border: 2px solid #bae6fd;
+        }
+
+        .highlight-CHO {
+            background-color: #fef08a;
+            border: 2px solid #fde047;
+        }
+
+        .highlight-NH2 {
+            background-color: #ddd6fe;
+            border: 2px solid #c4b5fd;
+        }
+
+        .highlight-CH3 {
+            background-color: #f1f5f9;
+            border: 2px solid #cbd5e1;
+        }
+
+        .group-highlight.highlight-iodoform {
+            background: rgba(234, 179, 8, 0.2);
+            border: 3px solid #eab308;
+            border-style: dotted;
+            border-radius: 16px;
+        }
+
+        .bond {
+            position: absolute;
+            background: var(--bond-color);
+            z-index: 20;
+            pointer-events: auto;
+            transform-origin: center left;
+            transition: box-shadow 0.1s;
+        }
+
+        .bond:hover {
+            z-index: 25;
+        }
+
+        .bond-hover {
+            box-shadow: 0 0 8px 4px rgba(99, 102, 241, 0.6);
+            cursor: pointer;
+        }
+
+        @keyframes pulse-bond {
+            0% {
+                box-shadow: 0 0 4px rgba(99, 102, 241, 0.4);
+                filter: brightness(1);
+            }
+
+            50% {
+                box-shadow: 0 0 20px 6px rgba(99, 102, 241, 0.9);
+                filter: brightness(1.5);
+            }
+
+            100% {
+                box-shadow: 0 0 4px rgba(99, 102, 241, 0.4);
+                filter: brightness(1);
+            }
+        }
+
+        .bond-addition-eligible {
+            animation: pulse-bond 1.5s infinite ease-in-out;
+            cursor: pointer;
+            z-index: 21;
+        }
+
+        .atom {
+            cursor: grab;
+        }
+
+        .atom.reaction-target {
+            cursor: pointer;
+            box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.5);
+            transform: translate(-50%, -50%) scale(1.05) !important;
+            z-index: 45;
+        }
+
+        .bond-single {
+            height: 4px;
+            margin-top: -2px;
+        }
+
+        .bond-double {
+            height: 12px;
+            margin-top: -6px;
+            background: transparent;
+            border-top: 4px solid var(--bond-color);
+            border-bottom: 4px solid var(--bond-color);
+        }
+
+        .bond-triple {
+            height: 18px;
+            margin-top: -9px;
+            background: transparent;
+            border-top: 4px solid var(--bond-color);
+            border-bottom: 4px solid var(--bond-color);
+            display: flex;
+            align-items: center;
+        }
+
+        .bond-triple::after {
+            content: '';
+            width: 100%;
+            height: 4px;
+            background: var(--bond-color);
+        }
+
+        .empty-arm {
+            position: absolute;
+            background: #ef4444;
+            height: 3px;
+            width: 24px;
+            z-index: 10;
+            pointer-events: none;
+            transform-origin: center left;
+            border-radius: 2px;
+            animation: pulse-arm 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-arm {
+
+            0%,
+            100% {
+                opacity: 0.6;
+            }
+
+            50% {
+                opacity: 1;
+            }
+        }
+
+        #selection-box {
+            position: absolute;
+            border: 1px solid #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+        }
+
+        #drag-ghost {
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0.7;
+            display: none;
+        }
+
+        #drag-ghost * {
+            pointer-events: none !important;
+        }
+
+        .pantry-item {
+            position: relative;
+        }
+
+        .pantry-item:active {
+            cursor: grabbing;
+        }
+
+        #drag-hint {
+            position: fixed;
+            pointer-events: none;
+            z-index: 10000;
+            background: rgba(15, 23, 42, 0.9);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: bold;
+            display: none;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+            transform: translate(-50%, -150%);
+        }
+
+        .pantry-item:hover::after {
+            content: attr(data-label);
+            position: absolute;
+            bottom: 110%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 8px;
+            background: #1e293b;
+            color: white;
+            font-size: 10px;
+            border-radius: 4px;
+            white-space: nowrap;
+            z-index: 2000;
+        }
+
+        header,
+        footer {
+            position: relative;
+            z-index: 1000;
+            background: white;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(4px);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: white;
+            width: 100%;
+            max-width: 400px;
+            padding: 24px;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            transform: scale(0.95);
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 800;
+            color: #1e293b;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-body {
+            font-size: 14px;
+            color: #64748b;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .modal-btn {
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .modal-btn-cancel {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .modal-btn-cancel:hover {
+            background: #e2e8f0;
+        }
+
+        .modal-btn-confirm {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .modal-btn-confirm:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3);
+        }
+
+        .modal-btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .modal-btn-danger:hover {
+            background: #dc2626;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.3);
+        }
+    </style>
+</head>
+
+<body class="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-900 select-none">
+    <div id="drag-ghost"></div>
+    <div id="drag-hint"></div>
+
+    <!-- Custom Modal -->
+    <div id="custom-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div id="modal-title" class="modal-title">
+                <i data-lucide="alert-circle" class="w-5 h-5 text-blue-500"></i>
+                <span>Confirmation</span>
+            </div>
+            <div id="modal-body" class="modal-body">
+                Are you sure you want to proceed?
+            </div>
+            <div class="modal-footer">
+                <button id="modal-cancel" class="modal-btn modal-btn-cancel">Cancel</button>
+                <button id="modal-confirm" class="modal-btn modal-btn-confirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <header id="header" class="p-4 border-b flex justify-between items-center h-24 shadow-sm">
+        <div class="flex items-center gap-4">
+            <div>
+                <h1 class="text-xl font-bold text-slate-800 tracking-tight">Organic Chemistry Sim</h1>
+                <div class="flex gap-2 mt-1">
+                    <button onclick="undo()" id="btn-undo"
+                        class="p-1.5 bg-slate-100 hover:bg-slate-200 rounded disabled:opacity-30 transition"
+                        title="元に戻す (Ctrl+Z)"><i data-lucide="undo-2" class="w-4 h-4"></i></button>
+                    <button onclick="redo()" id="btn-redo"
+                        class="p-1.5 bg-slate-100 hover:bg-slate-200 rounded disabled:opacity-30 transition"
+                        title="やり直し (Ctrl+Y)"><i data-lucide="redo-2" class="w-4 h-4"></i></button>
+                </div>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <div id="mol-status" class="bg-slate-100 px-4 py-2 rounded-lg border border-slate-200 min-w-[140px]">
+                <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-tighter">Status</span>
+                <span class="font-bold text-sm" id="status-text">Ready</span>
+            </div>
+            <div id="tool-options-container"
+                class="bg-slate-100 px-4 py-2 rounded-lg border border-slate-200 min-w-[140px]">
+                <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-tighter">Tool Options</span>
+                <div id="tool-options" class="flex gap-1 mt-1 min-h-[20px]"></div>
+            </div>
+            <div class="flex flex-col gap-1">
+                <div class="flex gap-1">
+                    <button onclick="toggleView('prop')" id="btn-view-prop"
+                        class="px-3 py-1 text-xs font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200"
+                        title="Toggle Properties">ℹ️ Info</button>
+                    <button onclick="toggleView('chiral')" id="btn-view-chiral"
+                        class="px-3 py-1 text-xs font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200"
+                        title="Toggle Chiral Centers">✨ Chiral</button>
+                </div>
+                <div class="flex gap-1">
+                    <button onclick="toggleView('ghostHydrogen')" id="btn-view-ghostHydrogen"
+                        class="px-3 py-1 text-xs font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200"
+                        title="見込み水素充填">👻 見込み水素</button>
+                    <button onclick="toggleView('highlightGroups')" id="btn-view-highlightGroups"
+                        class="px-3 py-1 text-xs font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200"
+                        title="官能基強調">🔍 官能基</button>
+                    <button onclick="toggleView('iodoform')" id="btn-view-iodoform"
+                        class="px-3 py-1 text-xs font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200"
+                        title="ヨードホルム反応陽性部位表示">🧪 ﾖｰﾄﾞﾎﾙﾑ</button>
+                </div>
+            </div>
+            <div class="flex gap-1">
+                <button onclick="fillHydrogen()"
+                    class="px-4 py-2 text-sm font-bold rounded bg-cyan-100 hover:bg-cyan-200 text-cyan-700 border border-cyan-300 transition shadow-sm"
+                    title="全ての空き手に水素を充填">💧 水素充填</button>
+                <button onclick="removeHydrogen()"
+                    class="px-4 py-2 text-sm font-bold rounded bg-rose-100 hover:bg-rose-200 text-rose-700 border border-rose-300 transition shadow-sm"
+                    title="全ての水素原子を削除">🗑️ 水素削除</button>
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="clearCanvas()"
+                class="px-4 py-2 bg-red-500 text-white hover:bg-red-600 rounded-lg text-xs font-bold transition shadow-sm">リセット</button>
+        </div>
+    </header>
+    <div class="flex-1 flex overflow-hidden relative">
+        <aside
+            class="w-16 bg-white border-r border-slate-200 flex flex-col items-center py-4 gap-4 z-20 shadow-sm flex-none">
+            <button onclick="setTool('move')" id="tool-move"
+                class="tool-btn active w-10 h-10 rounded-xl hover:bg-slate-100 transition text-slate-500 flex items-center justify-center relative group"
+                title="Move / Edit">
+                <i data-lucide="mouse-pointer-2"></i>
+                <span
+                    class="absolute left-12 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none z-50">移動・編集</span>
+            </button>
+            <div class="w-8 h-px bg-slate-200"></div>
+            <button onclick="setTool('addition')" id="tool-addition"
+                class="tool-btn w-10 h-10 rounded-xl hover:bg-slate-100 transition text-slate-500 flex items-center justify-center relative group"
+                title="付加反応 (Addition)">
+                <i data-lucide="plus-circle"></i>
+                <span
+                    class="absolute left-12 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none z-50">付加反応</span>
+            </button>
+            <button onclick="setTool('dehydration')" id="tool-dehydration"
+                class="tool-btn w-10 h-10 rounded-xl hover:bg-slate-100 transition text-slate-500 flex items-center justify-center relative group"
+                title="脱水反応 (Dehydration)">
+                <i data-lucide="droplets"></i>
+                <span
+                    class="absolute left-12 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none z-50">脱水反応</span>
+            </button>
+            <button onclick="setTool('oxidation')" id="tool-oxidation"
+                class="tool-btn w-10 h-10 rounded-xl hover:bg-slate-100 transition text-slate-500 flex items-center justify-center relative group"
+                title="酸化反応 (Oxidation)">
+                <i data-lucide="flame"></i>
+                <span
+                    class="absolute left-12 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none z-50">酸化反応</span>
+            </button>
+        </aside>
+        <div id="canvas-container" class="flex-1 relative overflow-auto bg-slate-50 cursor-crosshair">
+            <div id="canvas" class="relative origin-top-left" style="width: 3000px; height: 2000px;">
+                <div id="selection-box"></div>
+            </div>
+            <div id="prop-panel"
+                class="hidden absolute top-4 right-4 w-72 bg-white/95 backdrop-blur shadow-xl rounded-xl border border-slate-200 p-4 transition-all z-30 max-h-[calc(100vh-200px)] overflow-y-auto">
+                <div class="flex items-center justify-between mb-2 border-b pb-2">
+                    <h3 class="font-bold text-slate-700 flex items-center gap-2"><i data-lucide="flask-conical"
+                            class="w-4 h-4"></i> Molecules</h3>
+                    <button onclick="toggleView('prop')" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"
+                            class="w-4 h-4"></i></button>
+                </div>
+                <div id="molecule-list" class="flex flex-col gap-1"></div>
+            </div>
+        </div>
+    </div>
+    <footer id="footer"
+        class="flex-none h-auto min-h-[120px] border-t p-2 flex flex-col gap-2 bg-white shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-30">
+        <div class="flex justify-center gap-8 items-center">
+            <div class="flex flex-col items-center">
+                <span class="text-[9px] font-bold text-slate-400 uppercase mb-1">Atoms</span>
+                <div class="flex items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-100">
+                    <div draggable="true" ondragstart="handlePantryDragStart(event, 'atom', 'C')" data-label="炭素"
+                        class="pantry-item cursor-grab hover:scale-110 transition-transform atom-C w-10 h-10 rounded-full flex items-center justify-center font-extrabold shadow-sm">
+                        C</div>
+                    <div draggable="true" ondragstart="handlePantryDragStart(event, 'atom', 'H')" data-label="水素"
+                        class="pantry-item cursor-grab hover:scale-110 transition-transform atom-H w-10 h-10 rounded-full flex items-center justify-center font-extrabold shadow-sm text-xs">
+                        H</div>
+                    <div draggable="true" ondragstart="handlePantryDragStart(event, 'atom', 'O')" data-label="酸素"
+                        class="pantry-item cursor-grab hover:scale-110 transition-transform atom-O w-10 h-10 rounded-full flex items-center justify-center font-extrabold shadow-sm">
+                        O</div>
+                    <div draggable="true" ondragstart="handlePantryDragStart(event, 'atom', 'N')" data-label="窒素"
+                        class="pantry-item cursor-grab hover:scale-110 transition-transform atom-N w-10 h-10 rounded-full flex items-center justify-center font-extrabold shadow-sm">
+                        N</div>
+                    <div draggable="true" ondragstart="handlePantryDragStart(event, 'atom', 'Cl')" data-label="塩素"
+                        class="pantry-item cursor-grab hover:scale-110 transition-transform atom-Cl w-10 h-10 rounded-full flex items-center justify-center font-extrabold shadow-sm">
+                        Cl</div>
+                    <div draggable="true" ondragstart="handlePantryDragStart(event, 'atom', 'Br')" data-label="臭素"
+                        class="pantry-item cursor-grab hover:scale-110 transition-transform atom-Br w-10 h-10 rounded-full flex items-center justify-center font-extrabold shadow-sm">
+                        Br</div>
+                    <div draggable="true" ondragstart="handlePantryDragStart(event, 'atom', 'I')" data-label="ヨウ素"
+                        class="pantry-item cursor-grab hover:scale-110 transition-transform atom-I w-10 h-10 rounded-full flex items-center justify-center font-extrabold shadow-sm">
+                        I</div>
+                </div>
+            </div>
+            <div class="flex flex-col items-center">
+                <span class="text-[9px] font-bold text-indigo-400 uppercase mb-1">Functional Groups</span>
+                <div class="flex gap-1 mb-2">
+                    <button onclick="setGroupDirection('left')" id="dir-left"
+                        class="w-7 h-7 bg-indigo-100 hover:bg-indigo-200 rounded border border-indigo-300 flex items-center justify-center transition"
+                        title="左"><i data-lucide="arrow-left" class="w-3 h-3"></i></button>
+                    <button onclick="setGroupDirection('up')" id="dir-up"
+                        class="w-7 h-7 bg-white hover:bg-indigo-100 rounded border border-indigo-200 flex items-center justify-center transition"
+                        title="上"><i data-lucide="arrow-up" class="w-3 h-3"></i></button>
+                    <button onclick="setGroupDirection('down')" id="dir-down"
+                        class="w-7 h-7 bg-white hover:bg-indigo-100 rounded border border-indigo-200 flex items-center justify-center transition"
+                        title="下"><i data-lucide="arrow-down" class="w-3 h-3"></i></button>
+                    <button onclick="setGroupDirection('right')" id="dir-right"
+                        class="w-7 h-7 bg-white hover:bg-indigo-100 rounded border border-indigo-200 flex items-center justify-center transition"
+                        title="右"><i data-lucide="arrow-right" class="w-3 h-3"></i></button>
+                </div>
+                <div class="flex gap-4">
+                    <div class="flex flex-col items-center gap-1">
+                        <span class="text-[8px] text-slate-400">基本官能基</span>
+                        <div class="flex items-center gap-2 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'methyl')"
+                                data-label="メチル基 (-CH3)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-indigo-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -CH₃</div>
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'ethyl')"
+                                data-label="エチル基 (-C2H5)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-indigo-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -C₂H₅</div>
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'hydroxyl')"
+                                data-label="ヒドロキシ基 (-OH)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-indigo-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -OH</div>
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'carboxyl')"
+                                data-label="カルボキシ基 (-COOH)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-indigo-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -COOH</div>
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'formyl')"
+                                data-label="ホルミル基 (-CHO)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-indigo-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -CHO</div>
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'amino')"
+                                data-label="アミノ基 (-NH2)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-indigo-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -NH₂</div>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                        <span class="text-[8px] text-slate-400">結合・追加</span>
+                        <div class="flex items-center gap-2 bg-pink-50/50 p-2 rounded-xl border border-pink-100">
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'ether')"
+                                data-label="エーテル結合 (-O-)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-pink-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -O-</div>
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'ketone')"
+                                data-label="ケトン基 (-CO-)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-pink-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -CO-</div>
+                            <div draggable="true" ondragstart="handlePantryDragStart(event, 'group', 'ester')"
+                                data-label="エステル結合 (-COO-)"
+                                class="pantry-item cursor-grab hover:bg-white px-3 py-2 rounded-lg border border-pink-200 text-xs font-bold text-slate-700 transition shadow-sm bg-white/50">
+                                -COO-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button onclick="toggleView('chiral')" id="btn-chiral"
+                class="px-4 py-2 h-10 bg-white text-amber-600 border border-amber-200 rounded-lg font-bold text-xs transition shadow-sm hover:bg-amber-50">不斉炭素:
+                <span id="chiral-label">OFF</span></button>
+        </div>
+    </footer>
+    <script src="js/constants.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/chemistry.js"></script>
+    <script src="js/core.js"></script>
+    <script src="js/state_manager.js"></script>
+    <script src="js/render.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/reactions.js"></script>
+    <script src="js/interaction.js"></script>
+    <script src="js/main.js"></script>
+</body>
+
+</html>
