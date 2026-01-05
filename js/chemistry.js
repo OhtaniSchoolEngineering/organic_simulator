@@ -193,35 +193,8 @@ function formatFormulaWithSubscripts(formula) {
     });
 }
 
-// Analyze molecular structure
-function analyzeStructure(molAtoms) {
-    const carbons = molAtoms.filter(a => a.type === 'C');
+// analyzeStructure is defined later in the file with cis/trans support.
 
-    if (carbons.length === 0) {
-        return { type: 'non-hydrocarbon', carbons: [] };
-    }
-
-    // Find the longest carbon chain (main chain)
-    const mainChain = findLongestCarbonChain(carbons);
-
-    // Identify substituents and functional groups
-    const substituents = identifySubstituents(mainChain, molAtoms);
-    const functionalGroups = identifyFunctionalGroups(molAtoms);
-
-    // Check for double/triple bonds anywhere in the structure
-    const hasDoubleBond = molAtoms.some(a => a.connections.some(c => c.type === 2));
-    const hasTripleBond = molAtoms.some(a => a.connections.some(c => c.type === 3));
-
-    return {
-        type: 'hydrocarbon',
-        mainChain,
-        chainLength: mainChain.length,
-        substituents,
-        functionalGroups,
-        hasDoubleBond,
-        hasTripleBond
-    };
-}
 
 // Find longest carbon chain using DFS
 function findLongestCarbonChain(carbons) {
@@ -310,7 +283,22 @@ function identifyFunctionalGroups(molAtoms) {
         }
     });
 
-    // 2. Formyl group (-CHO)
+    // 2. Ester group (-COO-) - High priority
+    molAtoms.forEach(atom => {
+        if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
+            const doubleO = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'O' && atom.connections.find(c => c.targetId === a.id).type === 2);
+            const singleO = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'O' && atom.connections.find(c => c.targetId === a.id).type === 1);
+            if (doubleO && singleO && !usedAtomIds.has(doubleO.id) && !usedAtomIds.has(singleO.id)) {
+                const cOfO = singleO.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'C' && a !== atom);
+                if (cOfO) {
+                    groups.push({ type: 'COO', name: 'エステル', atomIds: [atom.id, doubleO.id, singleO.id] });
+                    [atom.id, doubleO.id, singleO.id].forEach(id => usedAtomIds.add(id));
+                }
+            }
+        }
+    });
+
+    // 3. Formyl group (-CHO)
     molAtoms.forEach(atom => {
         if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
             const doubleO = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'O' && atom.connections.find(c => c.targetId === a.id).type === 2);
@@ -322,69 +310,7 @@ function identifyFunctionalGroups(molAtoms) {
         }
     });
 
-    // 3. Hydroxyl group (-OH)
-    molAtoms.forEach(atom => {
-        if (atom.type === 'O' && !usedAtomIds.has(atom.id)) {
-            const hNeighbor = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'H');
-            const cNeighbor = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'C');
-            if (hNeighbor && cNeighbor) {
-                groups.push({ type: 'OH', name: 'ヒドロキシ', atomIds: [atom.id, hNeighbor.id] });
-                usedAtomIds.add(atom.id);
-                usedAtomIds.add(hNeighbor.id);
-            }
-        }
-    });
-
-    // 4. Amino group (-NH2)
-    molAtoms.forEach(atom => {
-        if (atom.type === 'N' && !usedAtomIds.has(atom.id)) {
-            const hNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
-            if (hNeighbors.length === 2) {
-                const ids = [atom.id, ...hNeighbors.map(h => h.id)];
-                groups.push({ type: 'NH2', name: 'アミノ', atomIds: ids });
-                ids.forEach(id => usedAtomIds.add(id));
-            }
-        }
-    });
-
-    // 5. Ethyl group (-C2H5) - Higher priority than methyl
-    molAtoms.forEach(atom => {
-        if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
-            const hNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
-            const otherCs = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'C' && !usedAtomIds.has(a.id));
-
-            if (hNeighbors.length === 2 && otherCs.length > 0) {
-                // Find if any carbon neighbor is a terminal methyl group
-                const methylC = otherCs.find(oc => {
-                    const och = oc.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
-                    const occ = oc.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'C');
-                    return och.length === 3 && occ.length === 1;
-                });
-
-                if (methylC) {
-                    const hOfMethyl = methylC.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
-                    const ids = [atom.id, methylC.id, ...hNeighbors.map(h => h.id), ...hOfMethyl.map(h => h.id)];
-                    groups.push({ type: 'ethyl', name: 'エチル基', atomIds: ids });
-                    ids.forEach(id => usedAtomIds.add(id));
-                }
-            }
-        }
-    });
-
-    // 6. Methyl group (-CH3)
-    molAtoms.forEach(atom => {
-        if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
-            const hNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
-            const nonHNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type !== 'H');
-            if (hNeighbors.length === 3 && nonHNeighbors.length === 1) {
-                const ids = [atom.id, ...hNeighbors.map(h => h.id)];
-                groups.push({ type: 'CH3', name: 'メチル', atomIds: ids });
-                ids.forEach(id => usedAtomIds.add(id));
-            }
-        }
-    });
-
-    // 7. Carbonyl/Ketone group (C=O)
+    // 4. Carbonyl/Ketone group (C=O)
     molAtoms.forEach(atom => {
         if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
             const doubleO = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'O' && atom.connections.find(c => c.targetId === a.id).type === 2);
@@ -401,28 +327,74 @@ function identifyFunctionalGroups(molAtoms) {
         }
     });
 
-    // 8. Ester group (-COO-)
+    // 5. Hydroxyl group (-OH)
     molAtoms.forEach(atom => {
-        if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
-            const doubleO = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'O' && atom.connections.find(c => c.targetId === a.id).type === 2);
-            const singleO = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'O' && atom.connections.find(c => c.targetId === a.id).type === 1);
-            if (doubleO && singleO && !usedAtomIds.has(doubleO.id) && !usedAtomIds.has(singleO.id)) {
-                const cOfO = singleO.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'C' && a !== atom);
-                if (cOfO) {
-                    groups.push({ type: 'COO', name: 'エステル', atomIds: [atom.id, doubleO.id, singleO.id] });
-                    [atom.id, doubleO.id, singleO.id].forEach(id => usedAtomIds.add(id));
-                }
+        if (atom.type === 'O' && !usedAtomIds.has(atom.id)) {
+            const hNeighbor = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'H');
+            const cNeighbor = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).find(a => a && a.type === 'C');
+            if (hNeighbor && cNeighbor) {
+                groups.push({ type: 'OH', name: 'ヒドロキシ', atomIds: [atom.id, hNeighbor.id] });
+                usedAtomIds.add(atom.id);
+                usedAtomIds.add(hNeighbor.id);
             }
         }
     });
 
-    // 9. Ether group (-O-)
+    // 6. Ether group (-O-)
     molAtoms.forEach(atom => {
         if (atom.type === 'O' && !usedAtomIds.has(atom.id)) {
             const cNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'C');
             if (cNeighbors.length === 2) {
                 groups.push({ type: 'COC', name: 'エーテル', atomIds: [atom.id] });
                 usedAtomIds.add(atom.id);
+            }
+        }
+    });
+
+    // 7. Amino group (-NH2)
+    molAtoms.forEach(atom => {
+        if (atom.type === 'N' && !usedAtomIds.has(atom.id)) {
+            const hNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
+            if (hNeighbors.length === 2) {
+                const ids = [atom.id, ...hNeighbors.map(h => h.id)];
+                groups.push({ type: 'NH2', name: 'アミノ', atomIds: ids });
+                ids.forEach(id => usedAtomIds.add(id));
+            }
+        }
+    });
+
+    // 8. Ethyl group (-C2H5)
+    molAtoms.forEach(atom => {
+        if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
+            const hNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
+            const otherCs = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'C' && !usedAtomIds.has(a.id));
+
+            if (hNeighbors.length === 2 && otherCs.length > 0) {
+                const methylC = otherCs.find(oc => {
+                    const och = oc.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
+                    const occ = oc.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'C');
+                    return och.length === 3 && occ.length === 1;
+                });
+
+                if (methylC) {
+                    const hOfMethyl = methylC.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
+                    const ids = [atom.id, methylC.id, ...hNeighbors.map(h => h.id), ...hOfMethyl.map(h => h.id)];
+                    groups.push({ type: 'ethyl', name: 'エチル基', atomIds: ids });
+                    ids.forEach(id => usedAtomIds.add(id));
+                }
+            }
+        }
+    });
+
+    // 9. Methyl group (-CH3)
+    molAtoms.forEach(atom => {
+        if (atom.type === 'C' && !usedAtomIds.has(atom.id)) {
+            const hNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type === 'H');
+            const nonHNeighbors = atom.connections.map(c => molAtoms.find(a => a.id === c.targetId)).filter(a => a && a.type !== 'H');
+            if (hNeighbors.length === 3 && nonHNeighbors.length === 1) {
+                const ids = [atom.id, ...hNeighbors.map(h => h.id)];
+                groups.push({ type: 'CH3', name: 'メチル', atomIds: ids });
+                ids.forEach(id => usedAtomIds.add(id));
             }
         }
     });
